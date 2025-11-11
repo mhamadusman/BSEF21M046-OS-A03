@@ -1,82 +1,88 @@
 #include "shell.h"
+#include <readline/readline.h>
+#include <readline/history.h>
 #include <ctype.h>
 
-/* main loop:
-   - read line
-   - if begins with !n => replace with history command
-   - add non-empty commands to history
-   - tokenize and execute
-*/
+/* check if a line is all whitespace */
+static int is_all_ws(const char *s) {
+    while (*s) {
+        if (!isspace((unsigned char)*s)) return 0;
+        s++;
+    }
+    return 1;
+}
+
+/* read_cmd implemented using readline */
+char* read_cmd(const char* prompt) {
+    char *line = readline(prompt); /* readline returns malloc'd string or NULL on EOF */
+    if (line == NULL) return NULL;
+    /* If line is empty or only whitespace, return empty string to caller (so they can skip) */
+    if (line[0] == '\0' || is_all_ws(line)) {
+        free(line);
+        return strdup(""); /* return an allocated empty string */
+    }
+    return line;
+}
 
 int main() {
-    char* cmdline = NULL;
-    char** arglist = NULL;
+    char *cmdline = NULL;
+    char **arglist = NULL;
 
-    history_init();
+    /* Enable tab completion provided by readline for filenames/commands */
+    rl_bind_key('\t', rl_complete);
 
     while (1) {
-        cmdline = read_cmd(PROMPT, stdin);
+        cmdline = read_cmd(PROMPT);
         if (cmdline == NULL) {
             /* EOF (Ctrl-D) */
             printf("\nShell exited.\n");
             break;
         }
 
-        /* Trim whitespace to check emptiness */
-        char *trimmed = strtrim(cmdline);
-        if (trimmed[0] == '\0') {
-            free(trimmed);
+        /* if empty string (only whitespace), prompt again */
+        if (strlen(cmdline) == 0) {
             free(cmdline);
             continue;
         }
 
-        /* Handle !n before tokenizing or adding to history */
-        if (trimmed[0] == '!') {
-            char *numstr = trimmed + 1;
-            int n = atoi(numstr);
-            if (n <= 0) {
-                fprintf(stderr, "Invalid history reference: %s\n", trimmed);
-                free(trimmed);
+        /* Handle !n re-execution BEFORE tokenization and before adding to history */
+        if (cmdline[0] == '!' ) {
+            char *endptr = NULL;
+            long n = strtol(cmdline + 1, &endptr, 10);
+            if (endptr == cmdline + 1 || *endptr != '\0' || n <= 0) {
+                fprintf(stderr, "Invalid history reference: %s\n", cmdline);
                 free(cmdline);
                 continue;
             }
-            char *histcmd = history_get_n(n);
-            if (histcmd == NULL) {
-                fprintf(stderr, "No such history entry: %d\n", n);
-                free(trimmed);
+            const char *h = hist_get((int)n); /* hist_get is 1-based */
+            if (h == NULL) {
+                fprintf(stderr, "No such history entry: %ld\n", n);
                 free(cmdline);
                 continue;
             }
-            /* replace cmdline with history command */
             free(cmdline);
-            cmdline = strdup(histcmd);
+            cmdline = strdup(h);
             if (cmdline == NULL) {
                 perror("strdup");
-                free(trimmed);
                 continue;
             }
-            /* we DO NOT add the !n string to history; we will add the expanded command later */
-        } else {
-            /* For normal commands, we'll add them to history below */
+            printf("%s\n", cmdline); /* show the expanded command */
         }
 
-        free(trimmed); /* done with trimmed copy */
+        /* Add to both our internal history and readline history */
+        hist_add(cmdline);
+        add_history(cmdline);
 
-        /* Add non-empty commands to history */
-        history_add(cmdline);
-
-        /* Tokenize */
+        /* Tokenize and execute */
         arglist = tokenize(cmdline);
         if (arglist != NULL) {
-            int exec_result = execute(arglist);
-            /* free arglist memory */
-            for (int i = 0; arglist[i] != NULL; i++) {
-                free(arglist[i]);
-            }
+            int exec_ret = execute(arglist);
+            /* free tokenized memory */
+            for (int i = 0; arglist[i] != NULL; ++i) free(arglist[i]);
             free(arglist);
 
-            /* If execute returns 0 -> exit requested */
-            if (exec_result == 0) {
+            /* if execute returned 0, built-in requested exit */
+            if (exec_ret == 0) {
                 free(cmdline);
                 break;
             }
@@ -85,6 +91,5 @@ int main() {
         free(cmdline);
     }
 
-    /* cleanup: history strings freed in history implementation if needed */
     return 0;
 }

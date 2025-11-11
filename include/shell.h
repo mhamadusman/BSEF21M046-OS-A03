@@ -10,33 +10,29 @@
 #include <errno.h>
 
 #define MAX_LEN 512
-#define MAXARGS 10
-#define ARGLEN 30
+#define MAXARGS 64
 #define PROMPT "FCIT> "
+#define HISTORY_SIZE 200
 
-/* History settings */
-#define HISTORY_SIZE 20
-
-/* I/O / core functions */
-char* read_cmd(char* prompt, FILE* fp);
+/* I/O and core */
+char* read_cmd(const char* prompt);
 char** tokenize(char* cmdline);
 int execute(char** arglist);
 
-/* Built-ins (from v2) */
+/* Builtins */
 int shell_cd(char **args);
 int shell_help(char **args);
 int shell_exit(char **args);
 int shell_pwd(char **args);
 int shell_echo(char **args);
+
+/* Builtin dispatcher */
 int execute_builtin(char **args);
 
-/* History functions (v3) */
-void history_init(void);
-void history_add(const char* cmdline);
-void history_print(void);
-char* history_get_n(int n); /* returns pointer to stored string or NULL */
+/* History helpers (implemented in shell.c) */
+void hist_add(const char* cmdline);         /* add to history buffer (internal) */
+void hist_print(void);                      /* builtin: print history */
+const char* hist_get(int index);            /* 1-based index get, return NULL if OOB */
+int hist_count(void);                       /* how many stored */
 
-/* helper */
-char* strtrim(const char *s);
-
-#endif // SHELL_H
+#endif /* SHELL_H */
