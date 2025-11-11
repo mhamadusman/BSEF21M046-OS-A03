@@ -2,9 +2,7 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <signal.h>
 
 /* check if a line is all whitespace */
 static int is_all_ws(const char *s) {
@@ -21,19 +19,30 @@ char* read_cmd(const char* prompt) {
     if (line == NULL) return NULL;
     if (line[0] == '\0' || is_all_ws(line)) {
         free(line);
-        return strdup(""); /* allocated empty string */
+        return strdup("");
     }
     return line;
+}
+
+/* ignore Ctrl-C in the shell itself */
+void sigint_handler(int sig) {
+    printf("\n"); // just move to next line
+    rl_on_new_line();
+    rl_replace_line("", 0);
+    rl_redisplay();
 }
 
 int main() {
     char *cmdline = NULL;
     char **arglist = NULL;
 
-    /* Enable tab completion */
+    /* enable tab completion */
     rl_bind_key('\t', rl_complete);
 
-    printf("Welcome to FCIT Shell (v5 — I/O Redirection + Pipes)\n");
+    /* set signal handler */
+    signal(SIGINT, sigint_handler);
+
+    printf("Welcome to FCIT Shell (v6 — Background & Signals)\n");
     printf("Type 'help' for built-in commands, use '!' to recall history entries.\n\n");
 
     while (1) {
@@ -48,7 +57,7 @@ int main() {
             continue;
         }
 
-        /* handle !n history expansion BEFORE tokenization */
+        /* handle !n history recall */
         if (cmdline[0] == '!') {
             char *endptr = NULL;
             long n = strtol(cmdline + 1, &endptr, 10);
@@ -58,17 +67,14 @@ int main() {
                 continue;
             }
             const char *h = hist_get((int)n);
-            if (!h) {
+            if (h == NULL) {
                 fprintf(stderr, "No such history entry: %ld\n", n);
                 free(cmdline);
                 continue;
             }
             free(cmdline);
             cmdline = strdup(h);
-            if (cmdline == NULL) {
-                perror("strdup");
-                continue;
-            }
+            if (cmdline == NULL) { perror("strdup"); continue; }
             printf("%s\n", cmdline);
         }
 
@@ -76,16 +82,13 @@ int main() {
         hist_add(cmdline);
         add_history(cmdline);
 
-        /* tokenize & execute (tokenize must be implemented in shell.c) */
+        /* tokenize and execute */
         arglist = tokenize(cmdline);
-        if (arglist) {
-            int ret = execute(arglist);
-
-            for (int i = 0; arglist[i]; i++)
-                free(arglist[i]);
+        if (arglist != NULL) {
+            int exec_ret = execute(arglist);
+            for (int i = 0; arglist[i] != NULL; ++i) free(arglist[i]);
             free(arglist);
-
-            if (ret == 0) { /* exit */
+            if (exec_ret == 0) {
                 free(cmdline);
                 break;
             }
