@@ -4,120 +4,184 @@
 #include <string.h>
 #include <ctype.h>
 
-/* History implementation (circular buffer) */
-static char* history_buf[HISTORY_SIZE];
-static int history_count = 0;  /* number of entries currently stored (<= HISTORY_SIZE) */
-static int history_start = 0;  /* index of the oldest stored entry (0..HISTORY_SIZE-1) */
+/* Simple history buffer (circular) */
+static char *history_buf[HISTORY_SIZE];
+static int history_start = 0; /* index of oldest stored */
+static int history_len = 0;   /* number of stored entries (<= HISTORY_SIZE) */
 
-/* initialize history */
-void history_init(void) {
-    for (int i = 0; i < HISTORY_SIZE; i++) history_buf[i] = NULL;
-    history_count = 0;
-    history_start = 0;
-}
-
-/* Helper trim: returns newly allocated trimmed string (must be freed by caller) */
-char* strtrim(const char *s) {
-    if (s == NULL) return strdup("");
-    /* leading */
-    while (isspace((unsigned char)*s)) s++;
-    if (*s == 0) return strdup("");
-    /* trailing */
-    const char *end = s + strlen(s) - 1;
-    while (end > s && isspace((unsigned char)*end)) end--;
-    size_t len = end - s + 1;
-    char *out = (char*)malloc(len + 1);
-    if (out) {
-        memcpy(out, s, len);
-        out[len] = '\0';
-    }
-    return out;
-}
-
-/* Add a command to history (duplicates the string) */
-void history_add(const char* cmdline) {
+/* Add command to internal history (makes a copy) */
+void hist_add(const char* cmdline) {
     if (cmdline == NULL) return;
-    char *trimmed = strtrim(cmdline);
-    if (trimmed == NULL) return;
-    if (trimmed[0] == '\0') { free(trimmed); return; }
-    free(trimmed);
+    /* allocate copy */
+    char *copy = strdup(cmdline);
+    if (!copy) return;
 
-    /* If buffer not full, place at (history_start + history_count) % HISTORY_SIZE */
-    if (history_count < HISTORY_SIZE) {
-        int idx = (history_start + history_count) % HISTORY_SIZE;
-        history_buf[idx] = strdup(cmdline);
-        if (history_buf[idx] == NULL) { perror("strdup"); return; }
-        history_count++;
+    if (history_len < HISTORY_SIZE) {
+        int pos = (history_start + history_len) % HISTORY_SIZE;
+        history_buf[pos] = copy;
+        history_len++;
     } else {
-        /* overwrite oldest at history_start */
+        /* overwrite oldest */
         free(history_buf[history_start]);
-        history_buf[history_start] = strdup(cmdline);
-        if (history_buf[history_start] == NULL) { perror("strdup"); return; }
-        history_start = (history_start + 1) % HISTORY_SIZE; /* move start to next oldest */
+        history_buf[history_start] = copy;
+        history_start = (history_start + 1) % HISTORY_SIZE;
     }
 }
 
-/* Print history numbered starting at 1 (oldest entry = 1) */
-void history_print(void) {
-    for (int i = 0; i < history_count; i++) {
+/* print history with 1-based numbering */
+void hist_print(void) {
+    int total = hist_count();
+    for (int i = 0; i < total; ++i) {
         int idx = (history_start + i) % HISTORY_SIZE;
         printf("%d %s\n", i+1, history_buf[idx]);
     }
 }
 
-/* Get nth history command where n is 1..history_count (1 = oldest) */
-char* history_get_n(int n) {
-    if (n < 1 || n > history_count) return NULL;
-    int idx = (history_start + (n - 1)) % HISTORY_SIZE;
+/* get 1-based index from history; returns NULL if out of range */
+const char* hist_get(int index) {
+    if (index <= 0 || index > history_len) return NULL;
+    int idx = (history_start + (index - 1)) % HISTORY_SIZE;
     return history_buf[idx];
 }
 
-/* Read command with prompt from fp; returns malloc'd string or NULL on EOF.
-   Caller must free. */
-char* read_cmd(char* prompt, FILE* fp) {
-    if (prompt) {
-        /* write prompt to stdout (not to fp) */
-        fputs(prompt, stdout);
-        fflush(stdout);
-    }
-
-    char buffer[MAX_LEN];
-    if (fgets(buffer, sizeof(buffer), fp) == NULL) {
-        return NULL; /* EOF or error */
-    }
-
-    /* strip trailing newline */
-    size_t len = strlen(buffer);
-    if (len > 0 && buffer[len - 1] == '\n') buffer[len - 1] = '\0';
-
-    return strdup(buffer);
+int hist_count(void) {
+    return history_len;
 }
 
-/* Tokenize a command line into a NULL-terminated array of strings.
-   Allocates memory for the array and for each token (use free as done in main). */
+/* Simple tokenizer: splits on whitespace; returns null-terminated array of strings (allocated).
+   Caller must free each string and the array. */
 char** tokenize(char* cmdline) {
     if (cmdline == NULL) return NULL;
 
-    char *copy = strdup(cmdline);
-    if (copy == NULL) return NULL;
-
-    char **args = malloc((MAXARGS + 1) * sizeof(char*));
-    if (args == NULL) { free(copy); return NULL; }
+    /* we will support up to MAXARGS tokens (+1 for NULL) */
+    char **args = calloc(MAXARGS + 1, sizeof(char*));
+    if (!args) {
+        perror("calloc");
+        return NULL;
+    }
 
     int argc = 0;
-    char *token = strtok(copy, " \t");
-    while (token != NULL && argc < MAXARGS) {
-        args[argc] = strdup(token);
-        if (args[argc] == NULL) { perror("strdup"); /* cleanup */ 
-            for (int j = 0; j < argc; j++) free(args[j]);
-            free(args);
-            free(copy);
-            return NULL;
+    char *p = cmdline;
+    while (*p != '\0' && argc < MAXARGS) {
+        /* skip whitespace */
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == '\0') break;
+
+        /* handle quoted strings (single or double quotes) */
+        if (*p == '"' || *p == '\'') {
+            char quote = *p++;
+            char *start = p;
+            /* find matching quote */
+            while (*p && *p != quote) p++;
+            size_t len = p - start;
+            char *tok = malloc(len + 1);
+            if (!tok) { perror("malloc"); goto token_err; }
+            memcpy(tok, start, len);
+            tok[len] = '\0';
+            args[argc++] = tok;
+            if (*p == quote) p++;
+        } else {
+            /* normal unquoted token */
+            char *start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t len = p - start;
+            char *tok = malloc(len + 1);
+            if (!tok) { perror("malloc"); goto token_err; }
+            memcpy(tok, start, len);
+            tok[len] = '\0';
+            args[argc++] = tok;
         }
-        argc++;
-        token = strtok(NULL, " \t");
     }
+
     args[argc] = NULL;
-    free(copy);
     return args;
+
+token_err:
+    for (int i = 0; i < argc; ++i) free(args[i]);
+    free(args);
+    return NULL;
+}
+
+/* Builtin implementations */
+
+int shell_cd(char **args) {
+    if (args == NULL || args[0] == NULL) return 1;
+    if (args[1] == NULL) {
+        char *home = getenv("HOME");
+        if (home) {
+            if (chdir(home) != 0) perror("cd");
+        } else {
+            fprintf(stderr, "cd: HOME not set\n");
+        }
+    } else {
+        if (chdir(args[1]) != 0) perror("cd");
+    }
+    return 1;
+}
+
+int shell_help(char **args) {
+    (void)args;
+    printf("Supported built-in commands:\n");
+    printf("  cd [dir]     - Change directory\n");
+    printf("  pwd          - Print current working directory\n");
+    printf("  echo [text]  - Display text\n");
+    printf("  history      - Show command history (numbered)\n");
+    printf("  help         - Show this help message\n");
+    printf("  exit         - Exit the shell\n");
+    return 1;
+}
+
+int shell_exit(char **args) {
+    (void)args;
+    printf("Bye!\n");
+    return 0; /* signal to main loop to exit */
+}
+
+int shell_pwd(char **args) {
+    (void)args;
+    char cwd[4096];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) printf("%s\n", cwd);
+    else perror("pwd");
+    return 1;
+}
+
+int shell_echo(char **args) {
+    if (args == NULL) return 1;
+    for (int i = 1; args[i] != NULL; ++i) {
+        if (i > 1) putchar(' ');
+        fputs(args[i], stdout);
+    }
+    putchar('\n');
+    return 1;
+}
+
+/* expose history as a builtin */
+int shell_history_builtin(char **args) {
+    (void)args;
+    hist_print();
+    return 1;
+}
+
+/* built-in command names and function pointers */
+static char *builtin_str[] = {
+    "cd", "help", "exit", "pwd", "echo", "history"
+};
+
+static int (*builtin_func[])(char **) = {
+    &shell_cd, &shell_help, &shell_exit, &shell_pwd, &shell_echo, &shell_history_builtin
+};
+
+int num_builtins() {
+    return sizeof(builtin_str) / sizeof(char *);
+}
+
+/* dispatcher: returns 0 if builtin requested shell exit; 1 if handled; -1 if not a builtin */
+int execute_builtin(char **args) {
+    if (args == NULL || args[0] == NULL) return 1;
+    for (int i = 0; i < num_builtins(); ++i) {
+        if (strcmp(args[0], builtin_str[i]) == 0) {
+            return (*builtin_func[i])(args);
+        }
+    }
+    return -1;
 }

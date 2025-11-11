@@ -16,7 +16,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	@mkdir -p $(BINDIR)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) -lreadline
 
 $(SRCDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
