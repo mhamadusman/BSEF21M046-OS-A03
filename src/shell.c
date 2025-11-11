@@ -8,6 +8,7 @@ char* read_cmd(char* prompt, FILE* fp) {
     while ((c = getc(fp)) != EOF) {
         if (c == '\n') break;
         cmdline[pos++] = c;
+        if (pos >= MAX_LEN - 1) break; // avoid overflow
     }
 
     if (c == EOF && pos == 0) {
@@ -45,7 +46,9 @@ char** tokenize(char* cmdline) {
         len = 1;
         while (*++cp != '\0' && !(*cp == ' ' || *cp == '\t')) {
             len++;
+            if (len >= ARGLEN-1) break; // guard
         }
+        if (len >= ARGLEN) len = ARGLEN - 1;
         strncpy(arglist[argnum], start, len);
         arglist[argnum][len] = '\0';
         argnum++;

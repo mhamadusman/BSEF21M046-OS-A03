@@ -1,28 +1,33 @@
-# Makefile for the Mini Shell Project
+# Makefile for FCIT Shell project (matches src/ and include/ layout)
 
 CC = gcc
-CFLAGS = -Wall -Iinclude
-SRC = src/main.c src/shell.c src/execute.c
-OBJ = $(SRC:.c=.o)
-BIN_DIR = bin
-TARGET = $(BIN_DIR)/myshell
+CFLAGS = -Wall -g -Iinclude
 
-# Default rule
+SRCDIR = src
+BINDIR = bin
+
+SRC = $(SRCDIR)/main.c $(SRCDIR)/shell.c $(SRCDIR)/execute.c
+OBJ = $(SRC:.c=.o)
+TARGET = $(BINDIR)/myshell
+
+.PHONY: all clean run shellsy
+
 all: $(TARGET)
 
-# Link object files into the final binary
 $(TARGET): $(OBJ)
-	@mkdir -p $(BIN_DIR)
+	@mkdir -p $(BINDIR)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
 
-# Compile each .c file into .o
-%.o: %.c
+$(SRCDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Clean up build files
 clean:
-	rm -rf $(OBJ) $(TARGET) $(BIN_DIR)
+	rm -f $(SRCDIR)/*.o $(TARGET)
 
-# Run the shell
 run: all
-	./$(TARGET)
+	$(TARGET)
+
+# convenience: create ./shell symlink to bin/myshell
+shellsy: all
+	ln -sf $(TARGET) ./shell
+	@echo "Created ./shell -> $(TARGET). You can now run ./shell"
