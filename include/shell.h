@@ -29,10 +29,14 @@ int shell_echo(char **args);
 /* Builtin dispatcher */
 int execute_builtin(char **args);
 
-/* History helpers (implemented in shell.c) */
-void hist_add(const char* cmdline);         /* add to history buffer (internal) */
-void hist_print(void);                      /* builtin: print history */
-const char* hist_get(int index);            /* 1-based index get, return NULL if OOB */
-int hist_count(void);                       /* how many stored */
+/* History helpers */
+void hist_add(const char* cmdline);
+void hist_print(void);
+const char* hist_get(int index);
+int hist_count(void);
+
+/* New helpers for redirection/pipes */
+int handle_redirection_and_execute(char **args);
+int handle_pipes(char **args);
 
 #endif /* SHELL_H */
